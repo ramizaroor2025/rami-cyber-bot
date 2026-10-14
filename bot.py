@@ -28,7 +28,6 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 
-# حالة المستخدم
 USER_STATE = {}
 
 KIND_AR = {
@@ -49,7 +48,6 @@ STATUS_AR = {
     "cancelled": "❌ ملغي",
 }
 
-# 📁 مجلد حفظ إشعارات الدفع
 RECEIPTS_DIR = "data/receipts"
 
 
@@ -532,7 +530,6 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("waiting_for", None)
         return
 
-    # 📥 تنزيل الصورة إلى مجلد data/receipts/
     os.makedirs(RECEIPTS_DIR, exist_ok=True)
     photo = update.message.photo[-1]
 
@@ -548,7 +545,6 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 💾 نخزّن المسار في قاعدة البيانات
     db.attach_payment_proof(order_id, file_path)
 
     context.user_data.pop("waiting_for", None)
@@ -562,7 +558,6 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
     )
 
-    # إشعار للأدمن مع الصورة
     order = db.get_order(order_id)
     if not order:
         return
@@ -670,7 +665,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============================================================
-# Flask server (مطلوب لـ Render)
+# Flask server (مطلوب لـ Render) + Endpoints
 # ============================================================
 health_app = Flask(__name__)
 
@@ -679,6 +674,61 @@ health_app = Flask(__name__)
 @health_app.route("/health")
 def health():
     return "Bot is running ✅", 200
+
+
+@health_app.route("/seed")
+def seed_endpoint():
+    """إضافة بيانات تجريبية (آمن للتشغيل المتكرر)."""
+    try:
+        # احذف القديم
+        with db.db() as conn:
+            conn.execute("DELETE FROM products")
+            conn.execute("DELETE FROM coupons")
+
+        products = [
+            ("book", "أساسيات الأمن السيبراني", "كتاب شامل يشرح أساسيات الأمن السيبراني من الصفر حتى الاحتراف، مع أمثلة عملية وتمارين.", 15.0, "أساسيات", "beginner"),
+            ("book", "الاختراق الأخلاقي", "دليل عملي لاختبار الاختراق باستخدام Kali Linux وأدواته الاحترافية.", 25.0, "اختراق", "intermediate"),
+            ("book", "التشفير وعلم التعمية", "شرح مفصل للتشفير المتماثل وغير المتماثل وخوارزمياته الحديثة.", 20.0, "تشفير", "advanced"),
+            ("course", "مقدمة في الأمن السيبراني", "دورة تأسيسية تشرح المفاهيم الأساسية والمصطلحات والتقنيات.", 50.0, "أساسيات", "beginner"),
+            ("course", "اختبار الاختراق الاحترافي", "دورة متقدمة تغطي OWASP Top 10 و Metasploit و Burp Suite.", 120.0, "اختراق", "advanced"),
+            ("course", "تحليل البرمجيات الخبيثة", "دورة متخصصة في تحليل Malware وعزلها وتحليلها.", 90.0, "تحليل جنائي", "advanced"),
+        ]
+
+        for type_, title, desc, price, cat, level in products:
+            db.add_product(type_, title, desc, price, cat, level)
+
+        db.create_coupon("CYBER20", discount_percent=20, max_uses=100)
+        db.create_coupon("WELCOME10", discount_percent=10, max_uses=200)
+
+        stats = db.get_stats()
+        return f"✅ تم إضافة {stats['products']} منتجات و 2 كوبونات\n\nالإحصائيات: {stats}", 200
+    except Exception as e:
+        return f"❌ خطأ: {e}", 500
+
+
+@health_app.route("/reset")
+def reset_endpoint():
+    """حذف كل البيانات (للطوارئ فقط)."""
+    try:
+        with db.db() as conn:
+            conn.execute("DELETE FROM order_items")
+            conn.execute("DELETE FROM orders")
+            conn.execute("DELETE FROM cart_items")
+            conn.execute("DELETE FROM products")
+            conn.execute("DELETE FROM coupons")
+            conn.execute("DELETE FROM users")
+            conn.execute("DELETE FROM reviews")
+            conn.execute("DELETE FROM support_messages")
+        return "✅ تم حذف كل البيانات", 200
+    except Exception as e:
+        return f"❌ خطأ: {e}", 500
+
+
+@health_app.route("/stats")
+def stats_endpoint():
+    """عرض الإحصائيات."""
+    s = db.get_stats()
+    return f"📊 الإحصائيات: {s}", 200
 
 
 def run_health_server():
@@ -704,7 +754,6 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_error_handler(error_handler)
 
-    # 🚀 شغّل Flask في Thread خلفي (مطلوب لـ Render)
     Thread(target=run_health_server, daemon=True).start()
 
     log.info("🛡️ Rami Cyber Academy bot is starting...")
