@@ -5,6 +5,9 @@
 
 import logging
 import os
+from threading import Thread
+from flask import Flask
+
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup,
 )
@@ -334,7 +337,6 @@ async def paymethod_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, metho
     total_amount = sum(it["price"] * it["quantity"] for it in items)
     db.clear_cart(user_id)
 
-    # 💾 حفظ order_id لاستقبال صورة الإشعار
     context.user_data["order_id"] = order_id
     context.user_data["waiting_for"] = "payment_proof"
 
@@ -507,7 +509,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============================================================
-# استقبال صورة إشعار الدفع (✅ معدّل: يحفظ الملف محلياً)
+# استقبال صورة إشعار الدفع
 # ============================================================
 async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """يستقبل صورة إشعار الدفع من الزبون، ينزّلها ويخزّن المسار."""
@@ -668,6 +670,23 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============================================================
+# Flask server (مطلوب لـ Render)
+# ============================================================
+health_app = Flask(__name__)
+
+
+@health_app.route("/")
+@health_app.route("/health")
+def health():
+    return "Bot is running ✅", 200
+
+
+def run_health_server():
+    port = int(os.environ.get("PORT", 10000))
+    health_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
+
+# ============================================================
 # main
 # ============================================================
 def main():
@@ -684,6 +703,9 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_error_handler(error_handler)
+
+    # 🚀 شغّل Flask في Thread خلفي (مطلوب لـ Render)
+    Thread(target=run_health_server, daemon=True).start()
 
     log.info("🛡️ Rami Cyber Academy bot is starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
