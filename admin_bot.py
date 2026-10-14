@@ -5,6 +5,9 @@
 
 import logging
 import os
+from threading import Thread
+from flask import Flask
+
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup,
     Bot,
@@ -48,7 +51,7 @@ STATUS_AR = {
 
 
 # ============================================================
-# حماية الأدمن (فقط على الدوال الأساسية)
+# حماية الأدمن
 # ============================================================
 def is_admin(uid):
     return uid in ADMIN_IDS
@@ -145,7 +148,7 @@ async def stats_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============================================================
-# الطلبات (بدون admin_only)
+# الطلبات
 # ============================================================
 async def orders_cb(update: Update, context: ContextTypes.DEFAULT_TYPE,
                     status: str, page: int):
@@ -250,7 +253,6 @@ async def order_detail_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, or
     if o.get("admin_note"):
         text += f"\n🗒️ *ملاحظة:* {o['admin_note']}\n"
 
-    # 💡 حالة إشعار الدفع
     if o.get("payment_proof"):
         text += f"\n✅ *الزبون أرسل إشعار الدفع*\n"
     else:
@@ -258,12 +260,10 @@ async def order_detail_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, or
 
     buttons = []
 
-    # زر عرض إشعار الدفع
     if o.get("payment_proof"):
         buttons.append([InlineKeyboardButton("📸 عرض إشعار الدفع",
                                              callback_data=f"view_proof:{order_id}")])
 
-    # أزرار الحالة
     if o["status"] == "pending_payment":
         buttons.append([InlineKeyboardButton("✅ تأكيد الدفع",
                                              callback_data=f"confirm_pay:{order_id}")])
@@ -301,7 +301,6 @@ async def view_proof_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, orde
             pass
         return
 
-    # تحقق أن الملف موجود
     if not os.path.exists(proof_path):
         try:
             await q.answer(f"⚠️ الملف غير موجود:\n{proof_path}", show_alert=True)
@@ -337,7 +336,6 @@ async def confirm_pay_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, ord
     except Exception:
         pass
 
-    # إشعار للزبون
     o = db.get_order(order_id)
     if o and CUSTOMER_BOT_TOKEN:
         try:
@@ -400,7 +398,7 @@ async def deliver_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, order_i
 
 
 # ============================================================
-# إدارة المنتجات (رئيسية - admin_only)
+# إدارة المنتجات
 # ============================================================
 @admin_only
 async def manage_products_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -686,14 +684,13 @@ async def support_view_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, ms
 
 
 # ============================================================
-# موجّه الأزرار (admin_only)
+# موجّه الأزرار
 # ============================================================
 @admin_only
 async def button_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     data = q.data or ""
 
-    # تجاهل الأزرار القديمة بهدوء
     try:
         await q.answer()
     except Exception:
@@ -750,11 +747,10 @@ async def button_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("support:"):
         status = data.split(":")[1]
         await support_cb(update, context, status)
-    # else: تجاهل
 
 
 # ============================================================
-# استقبال النصوص (admin_only)
+# استقبال النصوص
 # ============================================================
 @admin_only
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -826,7 +822,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============================================================
-# /cancel (admin_only)
+# /cancel
 # ============================================================
 @admin_only
 async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -858,6 +854,23 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============================================================
+# Flask server (مطلوب لـ Render)
+# ============================================================
+health_app = Flask(__name__)
+
+
+@health_app.route("/")
+@health_app.route("/health")
+def health():
+    return "Admin bot is running ✅", 200
+
+
+def run_health_server():
+    port = int(os.environ.get("PORT", 10000))
+    health_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
+
+# ============================================================
 # main
 # ============================================================
 def main():
@@ -874,6 +887,9 @@ def main():
     app.add_handler(CallbackQueryHandler(button_router))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_error_handler(error_handler)
+
+    # 🚀 شغل Flask في Thread خلفي (مطلوب لـ Render)
+    Thread(target=run_health_server, daemon=True).start()
 
     log.info("👑 Rami Cyber Admin bot is starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
