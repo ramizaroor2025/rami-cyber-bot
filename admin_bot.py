@@ -5,9 +5,6 @@
 
 import logging
 import os
-from threading import Thread
-from flask import Flask
-
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup,
     Bot,
@@ -854,26 +851,10 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============================================================
-# Flask server (مطلوب لـ Render)
+# build_admin_app — يُستدعى من bot.py (بدون Flask)
 # ============================================================
-health_app = Flask(__name__)
-
-
-@health_app.route("/")
-@health_app.route("/health")
-def health():
-    return "Admin bot is running ✅", 200
-
-
-def run_health_server():
-    port = int(os.environ.get("PORT", 10000))
-    health_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
-
-
-# ============================================================
-# main
-# ============================================================
-def main():
+def build_admin_app():
+    """يبني تطبيق بوت المدير (بدون تشغيل Flask)."""
     if not ADMIN_BOT_TOKEN:
         raise SystemExit("❌ ADMIN_BOT_TOKEN غير مضبوط في .env")
     if not ADMIN_IDS:
@@ -887,11 +868,34 @@ def main():
     app.add_handler(CallbackQueryHandler(button_router))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_error_handler(error_handler)
+    return app
 
-    # 🚀 شغل Flask في Thread خلفي (مطلوب لـ Render)
-    Thread(target=run_health_server, daemon=True).start()
 
-    log.info("👑 Rami Cyber Admin bot is starting...")
+# ============================================================
+# main — للتشغيل المحلي المستقل فقط
+# ============================================================
+def main():
+    """تشغيل بوت المدير مستقلًا (للتشغيل المحلي فقط)."""
+    from flask import Flask
+    from threading import Thread
+
+    app = build_admin_app()
+
+    # Flask محلي (فقط للتشغيل المستقل)
+    local_flask = Flask(__name__)
+
+    @local_flask.route("/")
+    @local_flask.route("/health")
+    def health():
+        return "Admin bot is running ✅", 200
+
+    def run_local_flask():
+        port = int(os.environ.get("PORT", 10000))
+        local_flask.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
+    Thread(target=run_local_flask, daemon=True).start()
+
+    log.info("👑 Rami Cyber Admin bot is starting (standalone)...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
